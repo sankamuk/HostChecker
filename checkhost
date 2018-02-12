@@ -1,4 +1,11 @@
 #!/bin/bash
+###############################################################################################################
+# Usage  : This script will generate System Health report.
+# Execution: checkhost
+# Author: Sankar Mukhejee
+# Date   :  March 21st 2017
+# Version: 1.0
+###############################################################################################################
 
 # SAR Report Section
 offbold=`tput rmso`
