@@ -12,6 +12,8 @@ Few of the important points regarding the tool:
 
 Below is a sample report.
 
+<img src="images/hostchecker.jpg" height="300">
+
 Note
   1. Installation is extremely simple and consists of coping the directory and giving appropiate permission to the main executable. 
   2. Note this tool is only usable in Linux environment with Bash and SAR utility available.
