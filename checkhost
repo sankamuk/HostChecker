@@ -1,0 +1,106 @@
+#!/bin/bash
+
+# SAR Report Section
+offbold=`tput rmso`
+bold=`tput smso`
+scpt_hm=$(cd $(dirname $0);pwd)
+rm -f ${scpt_hm}/tmp/*.tmp
+
+# Daily SAR Report creation
+printf "%8s %8s %8s %8s %8s \n" "TIME" "CPU" "MEM" "SWAP" "IO" >> ${scpt_hm}/tmp/sar.dl.tmp
+printf "%8s %8s %8s %8s %8s= \n" "========" "========" "========" "========" "========"  >> ${scpt_hm}/tmp/sar.dl.tmp
+ls -ltr /var/log/sa/sa[0-9]* | tail -2 | awk '{ print $9 }' | while read repFl
+do
+	sar -u -f ${repFl} | grep ^[012][0-9]:00: | awk '{ print $1" "$2" "$9 }' | grep -v idle >> ${scpt_hm}/tmp/sar.dl.cpu.tmp
+	sar -r -f ${repFl} | grep ^[012][0-9]:00: | awk '{ print $5 }' | grep -v memused >> ${scpt_hm}/tmp/sar.dl.mem.tmp
+	sar -S -f ${repFl} | grep ^[012][0-9]:00: | awk '{ print $5 }' | grep -v swpused >> ${scpt_hm}/tmp/sar.dl.swp.tmp
+        sar -b -f ${repFl} | grep ^[012][0-9]:00: | awk '{ print $3 }' | grep -v tps >> ${scpt_hm}/tmp/sar.dl.io.tmp
+done
+paste ${scpt_hm}/tmp/sar.dl.cpu.tmp ${scpt_hm}/tmp/sar.dl.mem.tmp ${scpt_hm}/tmp/sar.dl.swp.tmp ${scpt_hm}/tmp/sar.dl.io.tmp | tail -24 >> ${scpt_hm}/tmp/sar.dl.tmp
+
+# Current SAR Report 
+printf "%8s %8s %8s %8s %8s \n" "TIME" "CPU" "MEM" "SWAP" "IO" >> ${scpt_hm}/tmp/sar.cur.tmp
+printf "%8s %8s %8s %8s %8s= \n" "========" "========" "========" "========" "========"  >> ${scpt_hm}/tmp/sar.cur.tmp
+sar -u | grep ^[012] | awk '{ print $1" "$2" "$9 }' | grep -v idle >> ${scpt_hm}/tmp/sar.cur.cpu.tmp
+sar -r | grep ^[012] | awk '{ print $5 }' | grep -v memused >> ${scpt_hm}/tmp/sar.cur.mem.tmp
+sar -S | grep ^[012] | awk '{ print $5 }' | grep -v swpused >> ${scpt_hm}/tmp/sar.cur.swp.tmp
+sar -b | grep ^[012] | awk '{ print $3 }' | grep -v tps >> ${scpt_hm}/tmp/sar.cur.io.tmp
+paste ${scpt_hm}/tmp/sar.cur.cpu.tmp ${scpt_hm}/tmp/sar.cur.mem.tmp ${scpt_hm}/tmp/sar.cur.swp.tmp ${scpt_hm}/tmp/sar.cur.io.tmp | tail -12 >> ${scpt_hm}/tmp/sar.cur.tmp
+
+# User wise utilization Report
+for user in `ps -ef | grep -v UID | awk '{print $1}'| sort | uniq`
+do      
+	top -b -n 1 -u $user | awk -v var="$user" 'NR > 7 { sumC += $9; }; { sumM += $10; } END { print var","sumC","sumM; }' >> ${scpt_hm}/tmp/user.cpu_mem.tmp
+done
+
+echo "USER         MEM      " >> ${scpt_hm}/tmp/user.mem.tmp
+echo "============ ======== " >> ${scpt_hm}/tmp/user.mem.tmp
+sort -t"," -k3,3nr ${scpt_hm}/tmp/user.cpu_mem.tmp | head -5 | awk -F"," '{ printf "%12s %8.2f \n",$1,$3 }' >> ${scpt_hm}/tmp/user.mem.tmp
+echo "USER         CPU      " >> ${scpt_hm}/tmp/user.cpu.tmp
+echo "============ ======== " >> ${scpt_hm}/tmp/user.cpu.tmp
+sort -t"," -k2,2nr ${scpt_hm}/tmp/user.cpu_mem.tmp | head -5 | awk -F"," '{ printf "%12s %8.2f \n",$1,$2 }' >> ${scpt_hm}/tmp/user.cpu.tmp
+
+# Process wise utilization report
+echo "PID      USER         MEM      COMMAND             " >> ${scpt_hm}/tmp/pss.mem.tmp
+echo "======= ============ ======== ====================" >> ${scpt_hm}/tmp/pss.mem.tmp
+ps aux --sort=-vsz,-rss | grep -v ^USER | head -5 | while read psLine
+do
+	psUsr=$(echo ${psLine} | awk '{ print $1 }')
+	psId=$(echo ${psLine} | awk '{ print $2 }')
+        psMem=$(echo ${psLine} | awk '{ print $4 }')
+        psComd=`ps -p $psId -o comm --no-headers`
+	printf "%7d %12s %8.2f %20s \n" "${psId}" "${psUsr}" "${psMem}" "${psComd}" >> ${scpt_hm}/tmp/pss.mem.tmp
+done
+
+echo "PID      USER         CPU      COMMAND             " >> ${scpt_hm}/tmp/pss.cpu.tmp
+echo "======= ============ ======== ====================" >> ${scpt_hm}/tmp/pss.cpu.tmp
+ps aux --sort=-pcpu | grep -v ^USER | head -5 | while read psLine
+do
+        psUsr=$(echo ${psLine} | awk '{ print $1 }')
+        psId=$(echo ${psLine} | awk '{ print $2 }')
+	psCpu=$(echo ${psLine} | awk '{ print $3 }')
+	psComd=`ps -p $psId -o comm --no-headers`
+        printf "%7d %12s %8.2f %20s \n" "${psId}" "${psUsr}" "${psCpu}" "${psComd}" >> ${scpt_hm}/tmp/pss.cpu.tmp
+done
+
+echo "PID      USER         SWAP           COMMAND             " >> ${scpt_hm}/tmp/pss.swp.tmp
+echo "======= ============ ============== ====================" >> ${scpt_hm}/tmp/pss.swp.tmp
+SUM=0
+for DIR in `find /proc/ -maxdepth 1 -type d | egrep "^/proc/[0-9]"` ; do
+        PID=`echo $DIR | cut -d / -f 3`
+        PROGNAME=`ps -p $PID -o comm --no-headers`
+        for SWAP in `grep Swap $DIR/smaps 2>/dev/null| awk '{ print $2 }'`
+	do
+        	let SUM=$SUM+$SWAP
+	done
+        echo "$PID,$SUM,$PROGNAME" >> ${scpt_hm}/tmp/pss.swp.int.tmp
+        SUM=0
+done
+cat ${scpt_hm}/tmp/pss.swp.int.tmp | sort -t"," -k2,2nr | head -5 | while read psLine
+do
+	psId=$(echo ${psLine} | awk -F"," '{ print $1 }')
+	swpM=$(echo ${psLine} | awk -F"," '{ print $2 }')
+	psComd=$(echo ${psLine} | awk -F"," '{ print $3 }')
+	psUsr=$(ps -p ${psId} -o user | tail -1)
+	printf "%7d %12s %14.2f %20s \n" "${psId}" " ${psUsr}" "${swpM}" "${psComd}" >> ${scpt_hm}/tmp/pss.swp.tmp
+done
+
+# Display Section
+clear
+echo -e "\033[31m			HOST HEALTH CHECK REPORT\033[0m"
+echo "${bold}====================================================================================================${offbold} "
+echo ""
+
+echo -e "\033[36mSAR REPORT (24 HOURS)                           SAR REPORT (2 HOURS)\033[0m"
+echo "${bold}==============================================${offbold} ${bold}==============================================${offbold} "
+paste ${scpt_hm}/tmp/sar.dl.tmp ${scpt_hm}/tmp/sar.cur.tmp
+echo ""
+
+echo -e "\033[36mCPU UTILIZATION (USER)   MEMORY UTILIZATION (USER)\033[0m"
+echo "${bold}======================${offbold}  ${bold}==============================${offbold} "
+paste ${scpt_hm}/tmp/user.cpu.tmp ${scpt_hm}/tmp/user.mem.tmp
+echo ""
+
+echo -e "\033[36mCPU UTILIZATION (PROCESS)                              MEMORY UTILIZATION (PROCESS)                            SWAP UTILIZATION (PROCESS)\033[0m"
+echo "${bold}==================================================${offbold}      ${bold}==================================================${offbold}      ${bold}========================================================${offbold}"
+paste ${scpt_hm}/tmp/pss.cpu.tmp  ${scpt_hm}/tmp/pss.mem.tmp ${scpt_hm}/tmp/pss.swp.tmp
